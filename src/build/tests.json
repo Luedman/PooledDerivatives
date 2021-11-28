@@ -1,0 +1,16 @@
+{
+  "contracts": {
+    "MockV3Aggregator": "9e734e161b5cafcca52a917f10266f5a8bc05b28",
+    "PooledDerivative": "df9171d4b65d59029b1599945ce7323c4c8432e5"
+  },
+  "tests": {
+    "tests/test_pooled_derivative.py": {
+      "coverage": false,
+      "isolated": false,
+      "results": ".F",
+      "sha1": "15bd4d1f908f8e12114768522a1bf6691c913a52",
+      "txhash": []
+    }
+  },
+  "tx": {}
+}
