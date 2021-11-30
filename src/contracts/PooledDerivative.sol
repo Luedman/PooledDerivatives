@@ -2,7 +2,7 @@
 // Author: Lukas Schreiner
 // Chainlink Hackaton 2021
 
-pragma solidity ^0.6.6;
+pragma solidity ^0.6.0;
 
 import "@chainlink/contracts/src/v0.6/interfaces/AggregatorV3Interface.sol";
 
@@ -29,7 +29,7 @@ contract PooledDerivative {
     uint256 public totalBalanceHedgingCapital;
     uint256 public totalBalanceHedgingCapitalExposed;
 
-    string description;
+    string public description;
     uint256 lastPrice;
     uint256 minUsd = 50 * 10**18;
     uint256 eqTolerance = 5;
@@ -44,7 +44,11 @@ contract PooledDerivative {
 
     event NewFunding(address _address, uint256 balance, string book);
     event ConratctStatus(string status, uint256 balance);
-    event BookStatus(uint256 balanceLong, uint256 balanceShort);
+    event BookStatus(
+        uint256 balanceLong,
+        uint256 balanceShort,
+        uint256 balanceHedge
+    );
 
     constructor(
         address _underlyingPriceFeed,
@@ -70,12 +74,7 @@ contract PooledDerivative {
 
         previousRoundId = _latestRoundID;
         previousPrice = _ulatestPrice;
-        previousTimeStamp = _latestTimestamp;
-    }
-
-    function getContractDescription() public view returns (string memory) {
-        // print a description of the derivative
-        return description;
+        previousTimeStamp = _latestTimestamp - 24 * 60 * 60;
     }
 
     function getResidual() public view returns (uint8, uint256) {
@@ -115,12 +114,13 @@ contract PooledDerivative {
             balance = bookLongSide[investorsLongSide[i]][0];
             totalBalanceLongSide += balance;
         }
-
-        for (uint256 i = 0; i < investorsLongSide.length; i++) {
-            balance = bookLongSide[investorsLongSide[i]][0];
-            weight = (balance / totalBalanceLongSide) * basisPoint;
-            bookLongSide[investorsLongSide[i]][1] = weight;
-            sumWeights += weight;
+        if (totalBalanceShortSide > 0) {
+            for (uint256 i = 0; i < investorsLongSide.length; i++) {
+                balance = bookLongSide[investorsLongSide[i]][0];
+                weight = (balance / totalBalanceLongSide) * basisPoint;
+                bookLongSide[investorsLongSide[i]][1] = weight;
+                sumWeights += weight;
+            }
         }
 
         //require(sumWeights <= hundredPercent,"LongSide: Weights do not sum to 100%");
@@ -130,10 +130,12 @@ contract PooledDerivative {
             balance = bookShortSide[investorsShortSide[i]][0];
             totalBalanceShortSide += balance;
         }
-        for (uint256 i = 0; i < investorsShortSide.length; i++) {
-            weight = (balance / totalBalanceShortSide) * basisPoint;
-            bookShortSide[investorsShortSide[i]][1] = weight;
-            sumWeights += weight;
+        if (totalBalanceShortSide > 0) {
+            for (uint256 i = 0; i < investorsShortSide.length; i++) {
+                weight = (balance / totalBalanceShortSide) * basisPoint;
+                bookShortSide[investorsShortSide[i]][1] = weight;
+                sumWeights += weight;
+            }
         }
         //require(sumWeights <= hundredPercent, "LongSide: Weights do not sum to 100%");
 
@@ -142,15 +144,20 @@ contract PooledDerivative {
             balance = bookHedgeProviders[hedgeProviders[i]][0];
             sumWeights += weight;
         }
-
-        for (uint256 i = 0; i < hedgeProviders.length; i++) {
-            weight = (balance / totalBalanceHedgingCapital) * basisPoint;
-            bookHedgeProviders[investorsShortSide[i]][1] = weight;
-
-            totalBalanceHedgingCapital += balance;
+        if (totalBalanceHedgingCapital > 0) {
+            for (uint256 i = 0; i < hedgeProviders.length; i++) {
+                weight = (balance / totalBalanceHedgingCapital) * basisPoint;
+                bookHedgeProviders[investorsShortSide[i]][1] = weight;
+                totalBalanceHedgingCapital += balance;
+            }
         }
+
         //require(sumWeights <= hundredPercent,"LongSide: Weights do not sum to 100%");
-        emit BookStatus(totalBalanceLongSide, totalBalanceShortSide);
+        emit BookStatus(
+            totalBalanceLongSide,
+            totalBalanceShortSide,
+            totalBalanceHedgingCapital
+        );
     }
 
     // ToDo: Summarize in one function
@@ -223,13 +230,10 @@ contract PooledDerivative {
         );
         transferFees(_latestTimestamp, _previousTimestamp);
 
-        uint256 timeDifference = (_latestTimestamp - _previousTimestamp);
-        require(timeDifference > 0, "TimeDiffrence");
-        require(_previousPrice > 0, "previous Price");
+        uint256 timeDifference = _latestTimestamp - _previousTimestamp;
         uint256 asset_return = (_latestPrice - _previousPrice) / _previousPrice;
         uint256 asset_return_annualized = ((asset_return *
             (365 * 24 * 60 * 60)) / timeDifference) * basisPoint;
-        require(asset_return_annualized > 0, "asset_return_annualized");
 
         uint256 returnLongSide = payoffFunction(
             timeDifference,
@@ -296,18 +300,19 @@ contract PooledDerivative {
             address hedgeProvider = hedgeProviders[i];
             bookLongSide[hedgeProvider][0] = 0;
             bookShortSide[hedgeProvider][0] = 0;
+            bookLongSide[hedgeProvider][1] = 0;
+            bookShortSide[hedgeProvider][1] = 0;
+            bookHedgeProviders[hedgeProvider][2] = 0;
             bookHedgeProviders[hedgeProvider][3] = 0;
         }
+
         updateBooks();
     }
 
     function hedgeContract() internal {
         uint256 hedgeProvided;
         resetHedge();
-
         (uint8 status, uint256 residual) = getResidual();
-        // Case 0: Equilibrium
-        require(status != 0, "Contract is in equlibrium");
         // Case 1: Long side is underexposed
         if (status == 1) {
             emit ConratctStatus("Long side is underexposed", residual);
@@ -330,6 +335,9 @@ contract PooledDerivative {
                 bookHedgeProviders[hedgeProviders[i]][2] = hedgeProvided;
                 bookHedgeProviders[hedgeProviders[i]][3] = status;
             }
+        } else if (status == 1) {
+            // Case 0: Equilibrium
+            emit ConratctStatus("Contract is in equilibrium", residual);
         }
     }
 

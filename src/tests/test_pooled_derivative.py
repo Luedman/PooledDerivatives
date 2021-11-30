@@ -4,12 +4,12 @@ from brownie import network, accounts, exceptions, PooledDerivative
 import pytest
 
 
+# @pytest.mark.skip(reason="skip test")
 def test_funding():
     pooled_derivative = deploy_pooled_derivative()
     account = get_account()
 
-    print(account)
-    print(pooled_derivative.getContractDescription())
+    print(pooled_derivative.description())
     investment = 24 * 14 ** 10
     tx = pooled_derivative.enterLongSide({"from": account, "value": investment})
     tx.info()
@@ -27,14 +27,15 @@ def test_hedging():
     # pooled_derivative = PooledDerivative[-1]
     account = get_account()
 
-    print(account)
-    print(pooled_derivative.getContractDescription())
+    # print(account)
+    print(pooled_derivative.description())
     investment = 245 * 14 ** 10
     tx = pooled_derivative.enterLongSide({"from": account, "value": investment})
     tx.info()
     tx = pooled_derivative.enterShortSide({"from": account, "value": 2 * investment})
     tx.info()
-    tx.wait(2)
+    tx = pooled_derivative.provideHedgeCapital({"from": account, "value": investment})
+    tx.wait(1)
 
     print("Contract Funded")
     tx = pooled_derivative.callSettlement({"from": account})
